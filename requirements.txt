@@ -1,0 +1,24 @@
+# requirements.txt
+
+# Core ADK library
+google-adk
+
+# LLM integration (implicitly used by ADK for Gemini)
+google-generativeai
+
+# For loading environment variables from.env file
+python-dotenv
+
+# For the Search Agent's Tavily tool
+langchain-community
+langchain-core
+tavily-python
+langchain-tavily # Recommended newer package for Tavily tools
+
+# For the Content Extractor Agent's tool
+crawl4ai
+# Note: crawl4ai requires playwright, which might need browser binaries installed.
+# Run `playwright install --with-deps chromium` or `crawl4ai-setup` after pip install if needed.
+
+# Optional, but good practice for async operations used by crawl4ai
+asyncio
