@@ -1,5 +1,5 @@
 # **ADK Multi-Agent Research Assistant Team**
----
+
 ## **Description**
 
 This project demonstrates the construction and orchestration of a multi-agent research assistant team built **entirely using the Google Agent Development Kit (ADK)**. It exemplifies how ADK facilitates the creation of modular, collaborative AI systems by breaking down a complex research task into specialized agent roles. The team comprises of:
@@ -12,7 +12,6 @@ This project demonstrates the construction and orchestration of a multi-agent re
 
 This repository serves as a practical, code-first tutorial for developers aiming to leverage ADK’s features for building sophisticated, multi-agent applications. ADK promotes a development experience akin to traditional software engineering, emphasizing modularity, testability, and control.
 
----
 ## **Key Feature Highlight: ADK Multi-Agent Orchestration with AgentTool**
 
 A primary objective of this example is to showcase ADK’s robust capabilities for orchestrating interactions within a multi-agent system. This is achieved through several core ADK features working in concert: 
@@ -27,7 +26,6 @@ A primary objective of this example is to showcase ADK’s robust capabilities f
     -   Upon completion, the specialist agent’s final response is captured by the AgentTool and returned to the coordinator agent as the output of the “tool” call.
     -   This abstraction significantly simplifies the coordinator’s instruction prompt. Instead of needing complex logic to manage state transitions or sequential execution, the coordinator focuses on *when* to delegate to *which* specialist based on the user request and the descriptions provided by the AgentTool wrappers. This explicit, tool-based delegation pattern is a powerful and intuitive way ADK enables the construction of hierarchical and collaborative agent teams.
 
----
 ## **Architecture Overview**
 
 The system operates based on a coordinator-specialist (or manager-worker) pattern facilitated by ADK’s AgentTool:
@@ -52,7 +50,6 @@ The system operates based on a coordinator-specialist (or manager-worker) patter
 | content_extractor    | content_extractor.py | Extracts text content from URLs            | FunctionTool               | Crawl4AI             | Invoked by AgentTool                |
 | summarizer_agent     | summarizer.py        | Summarizes provided text                   | None (uses LLM core)       | \-                   | Invoked by AgentTool                |
 
----
 ## **Prerequisites**
 
 -   **Python:** Version 3.9 or higher.1  
@@ -65,7 +62,6 @@ The system operates based on a coordinator-specialist (or manager-worker) patter
         -   **Option 2 (Cloud Integrated):** Google Cloud Project with billing enabled and the Vertex AI API enabled. Requires gcloud CLI authentication.
 -   **(Potentially) Browser Binaries:** The crawl4ai library uses Playwright, which may require browser binaries (like Chromium) to be installed. The crawl4ai-setup command or playwright install usually handles this.
 
----
 ## **Installation**
 
 1.  **Clone the repository:**
@@ -96,7 +92,6 @@ The system operates based on a coordinator-specialist (or manager-worker) patter
     # python -m playwright install --with-deps chromium
 ```
 
----
 ## **Configuration**
 
 1.  Create a file named .env in the root directory of the project (adk-research-team/).  
@@ -151,7 +146,6 @@ The system operates based on a coordinator-specialist (or manager-worker) patter
 
 *Note: The python-dotenv library (included in requirements.txt) is used by the Python scripts to automatically load these variables from the .env file.*
 
----
 ## **Usage**
 
 Make sure you are in the project’s root directory (adk-research-team/), your virtual environment is activated, and your .env file is correctly configured.
@@ -185,13 +179,14 @@ This allows you to interact with the agent directly in your terminal.
 **Example Prompts:**
 
 -   “Find information about the benefits of using Google ADK.” (Triggers search_agent)
--   “Extract the main content from this URL:” (Triggers content_extractor)
+-   “Extract the main content from this URL: https://google.github.io/adk-docs/” (Triggers content_extractor)
 -   “Summarize the following text: \[paste some text\]” (Triggers summarizer_agent)
 -   “Research the latest advancements in multi-agent systems using Google ADK, extract content from the top 2 results, and provide a concise summary.” (Triggers the full Search -\> Extract -\> Summarize sequence via the coordinator)
 
 ## **Code Structure**
 
 The project follows the standard ADK convention for structuring agent code:
+
 adk-research-team /
 ├── .env                        # API keys and configuration secrets  
 ├── requirements.txt            # Python package dependencies  
@@ -202,7 +197,6 @@ adk-research-team /
     ├── content_extractor.py    # Defines the ‘content_extractor’ specialist
     └── summarizer.py           # Defines the ‘summarizer_agent’ specialist
 
----
 ## **How It Works (Detailed Flow)**
 
 1.  **Entry Point:** When you run adk web. or adk run agent_module, ADK loads the root_agent defined in agent_module/agent.py (via agent_module/\_\_init\_\_.py).
@@ -219,7 +213,6 @@ adk-research-team /
     -   Call another specialist if required by the workflow (e.g., call content_extractor with a URL from search_agent’s results).
     -   Synthesize information from multiple specialist calls before generating the final response.
 
----
 ## **ADK Ecosystem Context**
 
 This example provides a foundation for building more complex agentic systems with ADK. While it runs locally, agents developed using ADK are designed with deployment and evaluation in mind:
@@ -229,7 +222,6 @@ This example provides a foundation for building more complex agentic systems wit
 
 Understanding this ecosystem context is valuable for developers considering ADK for real-world applications, as it demonstrates a supported pathway to production and integration within Google Cloud.
 
----
 ## **Contributing**
 
 Contributions are welcome! Please feel free to submit pull requests or open issues to improve this example.

@@ -1,139 +1,187 @@
 # agent_module/content_extractor.py
-
+from dotenv import load_dotenv
 import os
 import asyncio
-from dotenv import load_dotenv
+from firecrawl import FirecrawlApp # Changed import
 from google.adk import Agent
 from google.adk.tools import FunctionTool
 from google.adk.tools.tool_context import ToolContext
-from crawl4ai import AsyncWebCrawler # Ensure crawl4ai is installed
+import concurrent.futures # For running async code in a separate thread
+import sys # For the Windows event loop policy fix
 
-# Load environment variables from.env file
+# Load environment variables
 load_dotenv()
 
-# --- Model Configuration ---
-# Read the desired model name from environment variables
-# Provide a sensible default if the variable is not set
+# Initialize FirecrawlApp globally or manage its lifecycle as appropriate
+firecrawl_app_instance = None
 SPECIALIST_AGENT_MODEL = os.getenv("SPECIALIST_AGENT_MODEL", "gemini-1.5-flash-latest")
-# --- ---
 
-async def extract_content_from_url(url: str, include_headers: bool = False, tool_context: ToolContext = None) -> dict:
-    """
-    Extracts the primary textual content from a given web page URL using Crawl4AI.
 
-    This function acts as a custom tool for an ADK agent. It leverages the
-    AsyncWebCrawler to fetch and parse the content, returning a structured
-    dictionary containing the extracted markdown, metadata, and status.
+def get_firecrawl_app():
+    """Initializes and returns a FirecrawlApp instance."""
+    global firecrawl_app_instance
+    if firecrawl_app_instance is None:
+        api_key = os.getenv("FIRECRAWL_API_KEY")
+        if not api_key:
+            raise ValueError("FIRECRAWL_API_KEY not found in environment variables. "
+                             "Cannot initialize Firecrawl client.")
+        firecrawl_app_instance = FirecrawlApp(api_key=api_key)
+    return firecrawl_app_instance
 
-    Args:
-        url (str): The URL of the web page to crawl and extract content from.
-        include_headers (bool): Whether to include extracted H1-H6 headers
-                                 in the response. Defaults to False.
-        tool_context (ToolContext, optional): ADK-provided context object.
-
-    Returns:
-        dict: A dictionary summarizing the extraction result.
-    """
-    print(f" Attempting to extract content from: {url}")
+# Define the core async logic outside the main sync function
+async def _crawl_and_extract_async(url: str, include_headers: bool, tool_context: ToolContext = None):
+    """The core async logic for crawling using Firecrawl."""
+    print(f" Async crawl started for: {url}")
     try:
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(
-                url=url,
-                include_headers=include_headers
-            )
+        firecrawl = get_firecrawl_app()
 
-            page_title = getattr(result, 'title', None)
-            markdown_content = getattr(result, 'markdown', "")
-            headers_list = [h.text for h in getattr(result, 'headers',)] if include_headers else []
+        scrape_result = await asyncio.to_thread(
+            firecrawl.scrape_url,
+            url,
+        )
 
-            if not page_title:
-                page_title = url.split('/')[-1] if '/' in url else url
-                if markdown_content:
-                    lines = markdown_content.split('\n')
-                    for line in lines:
-                        if line.startswith('# '):
-                            page_title = line.replace('# ', '').strip()
-                            break
-
-            content_length = len(markdown_content)
-            truncated_content = markdown_content[:10000]
-            has_truncated = content_length > 10000
-
-            response = {
-                "status": "success",
-                "title": page_title,
-                "url": url,
-                "markdown_content": truncated_content,
-                "content_length": content_length,
-                "headers": headers_list,
-                "word_count": len(markdown_content.split()),
-                "has_truncated_content": has_truncated
+        # More robust check for a successful scrape and presence of data
+        if not scrape_result or not hasattr(scrape_result, 'success') or not scrape_result.success:
+            error_message = "Firecrawl failed to scrape the URL or returned an unsuccessful status."
+            if scrape_result and hasattr(scrape_result, 'error') and scrape_result.error:
+                error_message = f"Firecrawl error: {scrape_result.error}"
+            # If success is false, data attribute might not exist or be relevant
+            print(f" Error during Firecrawl scrape for {url}: {error_message}")
+            return {
+                "status": "error", "url": url, "error_message": error_message,
+                "title": url.split('/')[-1] if '/' in url else url,
+                "markdown_content": "No content extracted due to Firecrawl error.",
+                "content_length": 0, "headers":[], "word_count": 0, "has_truncated_content": False
             }
-            print(f" Successfully extracted content from: {url}. Title: {page_title}")
 
-            return response
+        # Explicitly check for the 'data' attribute after confirming success
+        if not hasattr(scrape_result, 'data') or not scrape_result.data:
+            error_message = "Firecrawl returned success but no 'data' attribute or data is empty."
+            print(f" Error during Firecrawl scrape for {url}: {error_message}")
+            return {
+                "status": "error", "url": url, "error_message": error_message,
+                "title": url.split('/')[-1] if '/' in url else url,
+                "markdown_content": "No content extracted, data missing in response.",
+                "content_length": 0, "headers":[], "word_count": 0, "has_truncated_content": False
+            }
+
+        # Now we can safely access scrape_result.data
+        data = scrape_result.data
+        metadata = data.metadata if hasattr(data, 'metadata') and data.metadata else {} # Ensure metadata is a dict
+        full_markdown_content = data.markdown if hasattr(data, 'markdown') and data.markdown else "No content extracted"
+
+        page_title = metadata.get('title') if metadata else None
+        if not page_title:
+            page_title = url.split('/')[-1] if '/' in url else url
+            if full_markdown_content and full_markdown_content!= "No content extracted":
+                lines = full_markdown_content.split('\n')
+                for line in lines:
+                    if line.startswith('# '):
+                        page_title = line.replace('# ', '').strip()
+                        break
+        
+        if tool_context and full_markdown_content and full_markdown_content!= "No content extracted":
+            tool_context.state[f"extracted_content_{url}"] = full_markdown_content
+
+        truncated_content = full_markdown_content[:10000]
+        content_len = len(full_markdown_content)
+        has_truncated = content_len > 10000
+
+        response = {
+            "status": "success",
+            "title": page_title,
+            "url": metadata.get('sourceURL', url) if metadata else url,
+            "markdown_content": truncated_content,
+            "content_length": content_len,
+            "headers":[],
+            "word_count": len(truncated_content.split()),
+            "has_truncated_content": has_truncated
+        }
+        print(f" Successfully extracted content from: {url}. Title: {page_title}")
+        return response
 
     except Exception as e:
-        print(f" Error extracting content from {url}: {e}")
+        print(f" Error during async extraction for {url}: {e}") # This will catch other unexpected errors
         return {
-            "status": "error",
-            "url": url,
-            "title": url,
-            "markdown_content": "Extraction failed.",
-            "content_length": 0,
-            "headers":[],
-            "word_count": 0,
-            "has_truncated_content": False,
-            "error_message": str(e)
+            "status": "error", "url": url, "error_message": f"An unexpected error occurred: {str(e)}",
+            "title": url.split('/')[-1] if '/' in url else url,
+            "markdown_content": "No content extracted due to an unexpected error.",
+            "content_length": 0, "headers":[], "word_count": 0, "has_truncated_content": False
         }
+
+# Synchronous wrapper function called by ADK's FunctionTool
+def extract_content_from_url(url: str, include_headers: bool = False, tool_context: ToolContext = None) -> dict:
+    """
+    Synchronous wrapper that extracts content from a URL using Firecrawl
+    by running the async logic in a separate thread.
+    """
+    print(f" Sync wrapper: Attempting to extract content from: {url}")
+
+    def run_async_task_in_thread():
+        if sys.platform == "win32":
+             try:
+                 current_policy = asyncio.get_event_loop_policy()
+                 if not isinstance(current_policy, asyncio.WindowsSelectorEventLoopPolicy):
+                    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+                    print("Applied WindowsSelectorEventLoopPolicy in thread.")
+                 else:
+                    print("WindowsSelectorEventLoopPolicy already active in thread context.")
+             except Exception as policy_error:
+                 print(f"Could not set event loop policy in thread: {policy_error}")
+        try:
+            return asyncio.run(_crawl_and_extract_async(url, include_headers, tool_context))
+        except Exception as run_error:
+            print(f" Error running asyncio.run in thread for {url}: {run_error}")
+            return {
+                "status": "error", "url": url, "error_message": f"Thread execution error: {str(run_error)}",
+                "title": url.split('/')[-1] if '/' in url else url,
+                "markdown_content": "Extraction failed due to thread execution error.",
+                "content_length": 0, "headers":[], "word_count": 0, "has_truncated_content": False
+            }
+
+    result = {}
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_async_task_in_thread)
+            result = future.result(timeout=60) 
+            print(f" Sync wrapper: Received result from thread for {url}")
+    except concurrent.futures.TimeoutError:
+        print(f" Sync wrapper: Timeout occurred while waiting for extraction thread for {url}")
+        result = {
+            "status": "error", "url": url, "error_message": "Extraction timed out after 60 seconds.",
+            "title": url.split('/')[-1] if '/' in url else url,
+            "markdown_content": "Extraction failed due to timeout.", "content_length": 0, "headers":[],
+            "word_count": 0, "has_truncated_content": False
+        }
+    except Exception as pool_error:
+        print(f" Sync wrapper: Error submitting task to thread pool for {url}: {pool_error}")
+        result = {
+            "status": "error", "url": url, "error_message": f"Thread pool error: {str(pool_error)}",
+            "title": url.split('/')[-1] if '/' in url else url,
+            "markdown_content": "Extraction failed due to thread pool error.", "content_length": 0, "headers":[],
+            "word_count": 0, "has_truncated_content": False
+        }
+    return result
 
 def create_content_extractor_agent():
     """
-    Creates an agent specialized in extracting and analyzing content from URLs.
-
-    This agent uses a FunctionTool wrapping the `extract_content_from_url`
-    async function, which employs the Crawl4AI library.
-
-    Returns:
-        Agent: An instance of google.adk.Agent configured for content extraction.
+    Creates an agent specialized in extracting and analyzing content from URLs using Firecrawl.
     """
-    # Wrap the custom async function using ADK's FunctionTool
     extract_content_tool = FunctionTool(func=extract_content_from_url)
-
-    # Define the Content Extractor Agent
     extractor_agent = Agent(
         name="content_extractor",
-        # Use the model name read from the environment variable
-        model=SPECIALIST_AGENT_MODEL, #
-        description="A specialized agent that extracts the main textual content from web page URLs using Crawl4AI.",
-        instruction="""You are a web content extraction specialist.
-        Your task is to retrieve the main textual content from a given URL.
-        1.  Receive a specific URL as input.
-        2.  Utilize the 'extract_content_from_url' tool to fetch and process the web page.
-        3.  The tool will return a dictionary containing the extracted content ('markdown_content'), page title, URL, status, and other metadata.
-        4.  Present the key information from the tool's response clearly:
-            - State the page Title and URL.
-            - Provide the extracted 'markdown_content'.
-            - Mention if the content was truncated ('has_truncated_content').
-            - Report the approximate 'word_count'.
-            - If the 'status' is 'error', report the 'error_message'.
-        5.  Focus solely on reporting the results of the extraction process. Do not add analysis or summarization unless the tool's output itself contains it.
-        6.  If asked to extract from multiple URLs, process each one individually using the tool and present the results grouped by URL.
+        model=SPECIALIST_AGENT_MODEL, # Use the model from env
+        description="A specialized agent that extracts and analyzes content from web pages using Firecrawl.",
+        instruction="""You are a web content analysis specialist.
+        When given a URL, use the extract_content_from_url tool to fetch and analyze its content.
+        After extracting content:
+        1. Report the page title and basic metadata (word count, if content was truncated).
+        2. Note that HTTP-like headers are not available with the current extraction method.
+        3. Highlight key information found in the content that's most relevant to the user's request.
+        4. Note if there were any errors during extraction.
+        When extracting content from multiple URLs, organize the information clearly by URL.
+        If the extraction fails, explain the error and suggest possible solutions.
         """,
-        # Provide the ADK FunctionTool instance to the agent
         tools=[extract_content_tool]
     )
     return extractor_agent
-
-# Example of direct instantiation (useful for testing this agent module alone)
-# if __name__ == '__main__':
-#     agent = create_content_extractor_agent()
-#     print(f"Content Extractor Agent '{agent.name}' created successfully using model '{SPECIALIST_AGENT_MODEL}'.")
-#     async def test_extraction():
-#         test_url = "https://google.github.io/adk-docs/" # Example URL
-#         result = await extract_content_from_url(test_url)
-#         print("\n--- Direct Tool Function Test ---")
-#         import json
-#         print(json.dumps(result, indent=2))
-#         print("-------------------------------")
-#     asyncio.run(test_extraction())

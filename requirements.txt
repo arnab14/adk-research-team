@@ -15,10 +15,4 @@ langchain-core
 tavily-python
 langchain-tavily # Recommended newer package for Tavily tools
 
-# For the Content Extractor Agent's tool
-crawl4ai
-# Note: crawl4ai requires playwright, which might need browser binaries installed.
-# Run `playwright install --with-deps chromium` or `crawl4ai-setup` after pip install if needed.
-
-# Optional, but good practice for async operations used by crawl4ai
-asyncio
+firecrawl-py # For the Firecrawl tool
